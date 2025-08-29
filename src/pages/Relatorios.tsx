@@ -1,223 +1,267 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Download, 
-  Calendar,
-  BarChart3,
-  PieChart,
-  FileText,
-  TrendingUp,
-  Filter
-} from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Loader2, RefreshCw } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { startOfMonth, endOfMonth, subMonths } from "date-fns";
+
+// Import our new report components
+import { CashFlowChart } from "@/components/relatorios/CashFlowChart";
+import { ExpenseCategoryChart } from "@/components/relatorios/ExpenseCategoryChart";
+import { AgingChart } from "@/components/relatorios/AgingChart";
+import { SummaryCards } from "@/components/relatorios/SummaryCards";
+import { DateRangeFilter } from "@/components/relatorios/DateRangeFilter";
+import { ExportButtons } from "@/components/relatorios/ExportButtons";
+
+interface Transaction {
+  id: string;
+  amount: number;
+  type: 'RECEITA' | 'DESPESA';
+  status: 'pendente' | 'pago' | 'vencido';
+  description: string;
+  due_date: string | null;
+  created_at: string;
+  party_id: string | null;
+  tenant_id: string;
+}
 
 const Relatorios = () => {
-  const reports = [
-    {
-      id: 1,
-      name: "Relatório Mensal",
-      description: "Resumo completo das movimentações do mês",
-      type: "Financeiro",
-      lastGenerated: "15/03/2024",
-      status: "Atualizado",
-      icon: BarChart3,
-    },
-    {
-      id: 2,
-      name: "Fluxo de Caixa",
-      description: "Análise detalhada de entradas e saídas",
-      type: "Fluxo",
-      lastGenerated: "14/03/2024", 
-      status: "Atualizado",
-      icon: TrendingUp,
-    },
-    {
-      id: 3,
-      name: "Categorias de Despesas",
-      description: "Distribuição por categorias de gastos",
-      type: "Análise",
-      lastGenerated: "12/03/2024",
-      status: "Pendente",
-      icon: PieChart,
-    },
-    {
-      id: 4,
-      name: "Relatório Anual",
-      description: "Balanço completo do exercício fiscal",
-      type: "Anual",
-      lastGenerated: "01/01/2024",
-      status: "Atualizado",
-      icon: FileText,
-    },
-  ];
+  const { toast } = useToast();
+  
+  // State management
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    from: startOfMonth(subMonths(new Date(), 2)), // Last 3 months
+    to: endOfMonth(new Date())
+  });
 
-  const quickStats = [
-    {
-      title: "Relatórios Gerados",
-      value: "47",
-      period: "Este mês",
-      change: "+23%",
-    },
-    {
-      title: "Downloads",
-      value: "156",
-      period: "Total",
-      change: "+8%",
-    },
-    {
-      title: "Tipos Ativos",
-      value: "8",
-      period: "Configurados",
-      change: "=",
-    },
-  ];
+  // Fetch transactions from Supabase
+  const fetchTransactions = async (showRefreshToast = false) => {
+    try {
+      setRefreshing(showRefreshToast);
+      
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .gte('created_at', dateRange.from.toISOString())
+        .lte('created_at', dateRange.to.toISOString())
+        .order('created_at', { ascending: false });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Atualizado":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "Pendente":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "Erro":
-        return "bg-red-100 text-red-800 border-red-200";
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200";
+      if (error) {
+        throw error;
+      }
+
+      // Type cast the data to match our interface
+      const typedTransactions = (data || []).map(t => ({
+        ...t,
+        type: t.type as 'RECEITA' | 'DESPESA', 
+        status: t.status as 'pendente' | 'pago' | 'vencido'
+      }));
+      setTransactions(typedTransactions);
+      
+      if (showRefreshToast) {
+        toast({
+          title: "Dados Atualizados",
+          description: "Relatórios atualizados com sucesso!"
+        });
+      }
+    } catch (error: any) {
+      console.error('Error fetching transactions:', error);
+      toast({
+        title: "Erro ao Carregar Dados",
+        description: "Não foi possível carregar as transações. Tente novamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  // Load data on component mount and date range changes
+  useEffect(() => {
+    fetchTransactions();
+  }, [dateRange]);
+
+  // Real-time updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('transactions-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transactions'
+        },
+        () => {
+          fetchTransactions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [dateRange]);
+
+  const handleRefresh = () => {
+    fetchTransactions(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="w-6 h-6 animate-spin text-brand-primary" />
+          <span className="text-muted-foreground">Carregando relatórios...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Relatórios</h1>
+          <h1 className="text-3xl font-bold text-foreground">Relatórios Financeiros</h1>
           <p className="text-muted-foreground">
-            Análises e relatórios financeiros detalhados
+            Análises completas e insights do seu desempenho financeiro
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2">
-            <Filter className="w-4 h-4" />
-            Filtros
-          </Button>
-          <Button className="bg-brand-primary hover:bg-brand-primary-dark text-white shadow-md gap-2">
-            <Calendar className="w-4 h-4" />
-            Novo Relatório
+        <div className="flex flex-col sm:flex-row gap-2">
+          <ExportButtons transactions={transactions} dateRange={dateRange} />
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Atualizar
           </Button>
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {quickStats.map((stat, index) => (
-          <Card key={index} className="shadow-md">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-1">
-                <div className="text-2xl font-bold text-foreground">
-                  {stat.value}
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">{stat.period}</span>
-                  <span className={`font-medium ${
-                    stat.change.startsWith('+') 
-                      ? 'text-green-600' 
-                      : stat.change === '='
-                      ? 'text-muted-foreground'
-                      : 'text-red-600'
-                  }`}>
-                    {stat.change}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Recent Reports */}
+      {/* Filters */}
       <Card className="shadow-md">
         <CardHeader>
-          <CardTitle>Relatórios Disponíveis</CardTitle>
+          <CardTitle className="text-lg">Filtros de Período</CardTitle>
           <CardDescription>
-            Gerencie e baixe seus relatórios financeiros
+            Selecione o período para análise dos relatórios
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {reports.map((report) => (
-              <div 
-                key={report.id} 
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="p-2 bg-brand-primary/10 rounded-lg">
-                    <report.icon className="w-5 h-5 text-brand-primary" />
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-foreground">{report.name}</h3>
-                      <Badge className={getStatusColor(report.status)}>
-                        {report.status}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{report.description}</p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>Tipo: {report.type}</span>
-                      <span>Último: {report.lastGenerated}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm">
-                    Visualizar
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="gap-2"
-                    disabled={report.status === "Pendente"}
-                  >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <DateRangeFilter
+            dateRange={dateRange}
+            onDateRangeChange={setDateRange}
+          />
         </CardContent>
       </Card>
 
-      {/* Chart Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle>Receitas vs Despesas</CardTitle>
-            <CardDescription>Comparativo dos últimos 6 meses</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64 flex items-center justify-center bg-gradient-subtle rounded-lg">
-              <p className="text-muted-foreground">Gráfico de barras comparativo</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Main Report Tabs */}
+      <Tabs defaultValue="resumo" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="resumo">Resumo</TabsTrigger>
+          <TabsTrigger value="fluxo">Fluxo de Caixa</TabsTrigger>
+          <TabsTrigger value="categorias">Por Categoria</TabsTrigger>
+          <TabsTrigger value="vencimentos">Vencimentos</TabsTrigger>
+        </TabsList>
 
-        <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle>Distribuição por Categoria</CardTitle>
-            <CardDescription>Gastos por categoria este mês</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64 flex items-center justify-center bg-gradient-subtle rounded-lg">
-              <p className="text-muted-foreground">Gráfico de pizza</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        {/* Summary Tab */}
+        <TabsContent value="resumo" className="space-y-6">
+          <SummaryCards transactions={transactions} dateRange={dateRange} />
+          
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <CashFlowChart transactions={transactions} dateRange={dateRange} />
+            <ExpenseCategoryChart transactions={transactions} />
+          </div>
+        </TabsContent>
+
+        {/* Cash Flow Tab */}
+        <TabsContent value="fluxo" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <SummaryCards transactions={transactions} dateRange={dateRange} />
+          </div>
+          <CashFlowChart transactions={transactions} dateRange={dateRange} />
+        </TabsContent>
+
+        {/* Categories Tab */}
+        <TabsContent value="categorias" className="space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <ExpenseCategoryChart transactions={transactions} />
+            <Card className="shadow-md">
+              <CardHeader>
+                <CardTitle>Detalhamento por Categoria</CardTitle>
+                <CardDescription>
+                  Valores detalhados das principais categorias de despesas
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {/* This would be a detailed breakdown table */}
+                  <div className="text-center text-muted-foreground py-8">
+                    <p>Tabela detalhada de categorias</p>
+                    <p className="text-sm">(Implementação futura)</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Aging Tab */}
+        <TabsContent value="vencimentos" className="space-y-6">
+          <AgingChart transactions={transactions} />
+          
+          <Card className="shadow-md">
+            <CardHeader>
+              <CardTitle>Contas em Atraso</CardTitle>
+              <CardDescription>
+                Lista detalhada das contas vencidas que precisam de atenção
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {transactions
+                  .filter(t => t.status === 'vencido')
+                  .slice(0, 10)
+                  .map(transaction => (
+                    <div key={transaction.id} className="flex justify-between items-center p-3 border border-border rounded-lg">
+                      <div>
+                        <p className="font-medium text-foreground">{transaction.description}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {transaction.type} • Vencido
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-destructive">
+                          {new Intl.NumberFormat('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL'
+                          }).format(Number(transaction.amount))}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                }
+                {transactions.filter(t => t.status === 'vencido').length === 0 && (
+                  <div className="text-center text-muted-foreground py-8">
+                    <p>✅ Nenhuma conta em atraso!</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
