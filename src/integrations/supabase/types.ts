@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      installments: {
+        Row: {
+          created_at: string | null
+          due_date: string
+          emission_date: string
+          id: string
+          installment_number: number
+          status: string
+          tenant_id: string
+          transaction_id: string
+          value: number
+        }
+        Insert: {
+          created_at?: string | null
+          due_date: string
+          emission_date?: string
+          id?: string
+          installment_number: number
+          status?: string
+          tenant_id: string
+          transaction_id: string
+          value: number
+        }
+        Update: {
+          created_at?: string | null
+          due_date?: string
+          emission_date?: string
+          id?: string
+          installment_number?: number
+          status?: string
+          tenant_id?: string
+          transaction_id?: string
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "installments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "installments_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       parties: {
         Row: {
           address_city: string | null
@@ -98,6 +149,7 @@ export type Database = {
         Row: {
           created_at: string | null
           email: string | null
+          full_name: string | null
           id: string
           name: string | null
           role: string | null
@@ -106,6 +158,7 @@ export type Database = {
         Insert: {
           created_at?: string | null
           email?: string | null
+          full_name?: string | null
           id: string
           name?: string | null
           role?: string | null
@@ -114,6 +167,7 @@ export type Database = {
         Update: {
           created_at?: string | null
           email?: string | null
+          full_name?: string | null
           id?: string
           name?: string | null
           role?: string | null
@@ -203,7 +257,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      jwt_custom_claims: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

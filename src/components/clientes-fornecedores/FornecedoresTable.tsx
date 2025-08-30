@@ -7,6 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Edit, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useTenant } from "@/contexts/TenantContext";
 import { FornecedoresForm } from "./FornecedoresForm";
 
 interface Fornecedor {
@@ -22,6 +23,7 @@ interface Fornecedor {
 }
 
 export const FornecedoresTable = () => {
+  const { tenantId } = useTenant();
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
   const [filteredFornecedores, setFilteredFornecedores] = useState<Fornecedor[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -30,11 +32,17 @@ export const FornecedoresTable = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const fetchFornecedores = async () => {
+    if (!tenantId) {
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       const { data, error } = await supabase
         .from("parties")
         .select("*")
         .eq("party_type", "FORNECEDOR")
+        .eq("tenant_id", tenantId) // Filter by tenant
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -49,8 +57,10 @@ export const FornecedoresTable = () => {
   };
 
   useEffect(() => {
-    fetchFornecedores();
-  }, []);
+    if (tenantId) {
+      fetchFornecedores();
+    }
+  }, [tenantId]);
 
   useEffect(() => {
     const filtered = fornecedores.filter(fornecedor =>

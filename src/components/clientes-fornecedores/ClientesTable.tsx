@@ -7,6 +7,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Edit, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useTenant } from "@/contexts/TenantContext";
 import { ClientesForm } from "./ClientesForm";
 
 interface Cliente {
@@ -22,6 +23,7 @@ interface Cliente {
 }
 
 export const ClientesTable = () => {
+  const { tenantId } = useTenant();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [filteredClientes, setFilteredClientes] = useState<Cliente[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -30,11 +32,17 @@ export const ClientesTable = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const fetchClientes = async () => {
+    if (!tenantId) {
+      setIsLoading(false);
+      return;
+    }
+    
     try {
       const { data, error } = await supabase
         .from("parties")
         .select("*")
         .eq("party_type", "CLIENTE")
+        .eq("tenant_id", tenantId) // Filter by tenant
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -49,8 +57,10 @@ export const ClientesTable = () => {
   };
 
   useEffect(() => {
-    fetchClientes();
-  }, []);
+    if (tenantId) {
+      fetchClientes();
+    }
+  }, [tenantId]);
 
   useEffect(() => {
     const filtered = clientes.filter(cliente =>

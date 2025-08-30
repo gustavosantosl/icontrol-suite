@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useTenant } from "@/contexts/TenantContext";
 import { startOfMonth, endOfMonth, subMonths } from "date-fns";
 
 // Import our new report components
@@ -30,6 +31,7 @@ interface Transaction {
 
 const Relatorios = () => {
   const { toast } = useToast();
+  const { tenantId } = useTenant();
   
   // State management
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -42,12 +44,19 @@ const Relatorios = () => {
 
   // Fetch transactions from Supabase
   const fetchTransactions = async (showRefreshToast = false) => {
+    // Don't fetch if no tenant
+    if (!tenantId) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setRefreshing(showRefreshToast);
       
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
+        .eq('tenant_id', tenantId) // Filter by tenant
         .gte('created_at', dateRange.from.toISOString())
         .lte('created_at', dateRange.to.toISOString())
         .order('created_at', { ascending: false });
@@ -85,8 +94,10 @@ const Relatorios = () => {
 
   // Load data on component mount and date range changes
   useEffect(() => {
-    fetchTransactions();
-  }, [dateRange]);
+    if (tenantId) {
+      fetchTransactions();
+    }
+  }, [dateRange, tenantId]);
 
   // Real-time updates
   useEffect(() => {
@@ -108,7 +119,7 @@ const Relatorios = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [dateRange]);
+  }, [dateRange, tenantId]);
 
   const handleRefresh = () => {
     fetchTransactions(true);
