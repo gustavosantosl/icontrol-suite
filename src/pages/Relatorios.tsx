@@ -16,6 +16,7 @@ import { AgingChart } from "@/components/relatorios/AgingChart";
 import { SummaryCards } from "@/components/relatorios/SummaryCards";
 import { DateRangeFilter } from "@/components/relatorios/DateRangeFilter";
 import { ExportButtons } from "@/components/relatorios/ExportButtons";
+import { InstallmentCharts } from "@/components/installments/InstallmentCharts";
 
 interface Transaction {
   id: string;
@@ -179,11 +180,12 @@ const Relatorios = () => {
 
       {/* Main Report Tabs */}
       <Tabs defaultValue="resumo" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="resumo">Resumo</TabsTrigger>
           <TabsTrigger value="fluxo">Fluxo de Caixa</TabsTrigger>
           <TabsTrigger value="categorias">Por Categoria</TabsTrigger>
           <TabsTrigger value="vencimentos">Vencimentos</TabsTrigger>
+          <TabsTrigger value="parcelas">Parcelas</TabsTrigger>
         </TabsList>
 
         {/* Summary Tab */}
@@ -271,6 +273,11 @@ const Relatorios = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Installments Tab */}
+        <TabsContent value="parcelas" className="space-y-6">
+          <InstallmentCharts />
         </TabsContent>
       </Tabs>
     </div>

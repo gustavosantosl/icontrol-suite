@@ -9,7 +9,8 @@ import {
   ChevronLeft,
   Users,
   UserCog,
-  LogOut
+  LogOut,
+  Receipt
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,6 +37,11 @@ const menuItems = [
     title: "Contas",
     url: "/contas",
     icon: CreditCard,
+  },
+  {
+    title: "Parcelas",
+    url: "/parcelas",
+    icon: Receipt,
   },
   {
     title: "Clientes & Fornecedores",

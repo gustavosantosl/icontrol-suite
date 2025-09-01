@@ -8,6 +8,7 @@ import { AuthGuard } from "@/components/auth/AuthGuard";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Contas from "./pages/Contas";
+import Parcelas from "./pages/Parcelas";
 import Relatorios from "./pages/Relatorios";
 import Configuracoes from "./pages/Configuracoes";
 import ClientesFornecedores from "./pages/ClientesFornecedores";
@@ -41,6 +42,14 @@ const App = () => (
               <AuthGuard>
                 <AppLayout>
                   <Contas />
+                </AppLayout>
+              </AuthGuard>
+            } />
+            
+            <Route path="/parcelas" element={
+              <AuthGuard>
+                <AppLayout>
+                  <Parcelas />
                 </AppLayout>
               </AuthGuard>
             } />

@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { TransactionWithInstallments } from "@/components/installments/TransactionWithInstallments";
 import { 
   Plus, 
   Search, 
@@ -254,24 +255,26 @@ const Contas = () => {
             Gerencie contas a pagar e a receber
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button 
-              className="bg-brand-primary hover:bg-brand-primary-dark text-white shadow-md"
-              onClick={() => {
-                setEditingAccount(null);
-                setFormData({
-                  descricao: '',
-                  valor: '',
-                  dataVencimento: undefined,
-                  status: 'Pendente'
-                });
-              }}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Nova Conta
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <TransactionWithInstallments />
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button 
+                variant="outline"
+                onClick={() => {
+                  setEditingAccount(null);
+                  setFormData({
+                    descricao: '',
+                    valor: '',
+                    dataVencimento: undefined,
+                    status: 'Pendente'
+                  });
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Conta Simples
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>
@@ -406,6 +409,7 @@ const Contas = () => {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Summary Cards */}
