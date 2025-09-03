@@ -257,9 +257,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_transaction_with_installments: {
+        Args: {
+          p_description: string
+          p_first_due_date?: string
+          p_interval_days?: number
+          p_num_installments?: number
+          p_party_id?: string
+          p_payment_method?: string
+          p_tenant_id: string
+          p_total_value: number
+          p_type: string
+        }
+        Returns: string
+      }
       jwt_custom_claims: {
         Args: Record<PropertyKey, never>
         Returns: Json
+      }
+      mark_installment_paid: {
+        Args: { p_installment_id: string; p_tenant_id: string }
+        Returns: undefined
       }
     }
     Enums: {
