@@ -13,7 +13,7 @@ interface Transaction {
   id: string;
   description: string;
   amount: number;
-  type: string;
+  type: "pagar" | "receber";
   status: string;
   created_at: string;
 }
@@ -77,7 +77,12 @@ export function RecentTransactions() {
 
         if (error) throw error;
 
-        setTransactions(data || []);
+        setTransactions(
+          (data || []).map(transaction => ({
+            ...transaction,
+            type: transaction.type as "pagar" | "receber"
+          }))
+        );
       } catch (error) {
         console.error('Erro ao carregar transações recentes:', error);
       } finally {
@@ -183,7 +188,7 @@ export function RecentTransactions() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`w-2 h-2 rounded-full ${
-                    transaction.type === 'RECEITA' ? 'bg-emerald-500' : 'bg-red-500'
+                    transaction.type === 'receber' ? 'bg-emerald-500' : 'bg-red-500'
                   }`}></div>
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground line-clamp-1">
@@ -203,13 +208,13 @@ export function RecentTransactions() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className={`text-lg font-bold ${
-                    transaction.type === 'RECEITA' 
+                    transaction.type === 'receber' 
                       ? 'text-emerald-600' 
                       : 'text-red-600'
                   }`}>
-                    {transaction.type === 'RECEITA' ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+                    {transaction.type === 'receber' ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
                   </div>
-                  {transaction.type === 'RECEITA' ? (
+                  {transaction.type === 'receber' ? (
                     <ArrowUpRight className="w-4 h-4 text-emerald-500" />
                   ) : (
                     <ArrowDownRight className="w-4 h-4 text-red-500" />

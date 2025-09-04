@@ -23,19 +23,20 @@ import { format, subDays, startOfMonth, endOfMonth, eachDayOfInterval } from "da
 import { ptBR } from "date-fns/locale";
 
 interface ChartData {
-  cashFlow: Array<{
-    date: string;
-    receitas: number;
-    despesas: number;
-    saldo: number;
+  monthlyTotals: Array<{
+    month: string;
+    toPay: number;
+    toReceive: number;
   }>;
-  expensesByCategory: Array<{
+  statusDistribution: Array<{
     name: string;
     value: number;
+    percentage: number;
   }>;
-  overdueAccounts: Array<{
-    period: string;
-    count: number;
+  topParties: Array<{
+    name: string;
+    totalAmount: number;
+    transactionCount: number;
   }>;
 }
 
@@ -44,9 +45,9 @@ const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16'
 export function DashboardCharts() {
   const { profile } = useTenant();
   const [chartData, setChartData] = useState<ChartData>({
-    cashFlow: [],
-    expensesByCategory: [],
-    overdueAccounts: []
+    monthlyTotals: [],
+    statusDistribution: [],
+    topParties: []
   });
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({
@@ -66,98 +67,119 @@ export function DashboardCharts() {
       if (!profile?.tenant_id) return;
 
       try {
-        // Get transactions for the selected period
+        // Get all transactions with parties
         const { data: transactions } = await supabase
           .from('transactions')
-          .select('*')
-          .eq('tenant_id', profile.tenant_id)
-          .gte('created_at', dateRange.from.toISOString())
-          .lte('created_at', dateRange.to.toISOString())
-          .order('created_at', { ascending: true });
-
-        // Get installments data
-        const { data: installments } = await supabase
-          .from('installments')
-          .select('*')
+          .select(`
+            *,
+            parties!left(name)
+          `)
           .eq('tenant_id', profile.tenant_id);
 
-        // Process cash flow data
-        const days = eachDayOfInterval({
-          start: dateRange.from,
-          end: dateRange.to
-        });
+        // Process monthly totals for last 6 months
+        const months = [];
+        const now = new Date();
+        for (let i = 5; i >= 0; i--) {
+          const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          months.push(date);
+        }
 
-        const cashFlowData = days.map(day => {
-          const dayTransactions = transactions?.filter(t => 
-            format(new Date(t.created_at!), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
-          ) || [];
+        const monthlyTotals = months.map(month => {
+          const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
+          const monthEnd = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+          
+          const monthTransactions = transactions?.filter(t => {
+            const transactionDate = new Date(t.created_at!);
+            return transactionDate >= monthStart && transactionDate <= monthEnd;
+          }) || [];
 
-          const receitas = dayTransactions
-            .filter(t => t.type === 'RECEITA')
+          const toPay = monthTransactions
+            .filter(t => t.type === 'pagar')
             .reduce((sum, t) => sum + Number(t.amount), 0);
 
-          const despesas = dayTransactions
-            .filter(t => t.type === 'DESPESA')
+          const toReceive = monthTransactions
+            .filter(t => t.type === 'receber')
             .reduce((sum, t) => sum + Number(t.amount), 0);
 
           return {
-            date: format(day, 'dd/MM', { locale: ptBR }),
-            receitas,
-            despesas,
-            saldo: receitas - despesas
+            month: format(month, 'MMM/yy', { locale: ptBR }),
+            toPay,
+            toReceive
           };
         });
 
-        // Process expenses by category data
-        const expenseTransactions = transactions?.filter(t => t.type === 'DESPESA') || [];
-        const categoryMap = new Map<string, number>();
-        
-        expenseTransactions.forEach(transaction => {
-          const category = transaction.description?.split(' - ')[0] || 'Outros';
-          categoryMap.set(category, (categoryMap.get(category) || 0) + Number(transaction.amount));
-        });
-
-        const expensesByCategory = Array.from(categoryMap.entries())
-          .map(([name, value]) => ({ name, value }))
-          .sort((a, b) => b.value - a.value)
-          .slice(0, 6);
-
-        // Process overdue accounts data
-        const today = new Date();
-        const overdueInstallments = installments?.filter(i => 
-          i.status === 'pending' && new Date(i.due_date) < today
-        ) || [];
-
-        const overdueByPeriod = {
-          '1-30 dias': 0,
-          '31-60 dias': 0,
-          '61-90 dias': 0,
-          '90+ dias': 0
+        // Process status distribution
+        const statusCounts = {
+          pending: 0,
+          paid: 0,
+          received: 0,
+          overdue: 0
         };
 
-        overdueInstallments.forEach(installment => {
-          const daysDiff = Math.floor((today.getTime() - new Date(installment.due_date).getTime()) / (1000 * 60 * 60 * 24));
-          
-          if (daysDiff <= 30) {
-            overdueByPeriod['1-30 dias']++;
-          } else if (daysDiff <= 60) {
-            overdueByPeriod['31-60 dias']++;
-          } else if (daysDiff <= 90) {
-            overdueByPeriod['61-90 dias']++;
+        const todayStr = new Date().toISOString().split('T')[0];
+        
+        transactions?.forEach(transaction => {
+          if (transaction.status === 'paid') {
+            statusCounts.paid++;
+          } else if (transaction.status === 'received') {
+            statusCounts.received++;
+          } else if (transaction.due_date && transaction.due_date < todayStr) {
+            statusCounts.overdue++;
           } else {
-            overdueByPeriod['90+ dias']++;
+            statusCounts.pending++;
           }
         });
 
-        const overdueAccounts = Object.entries(overdueByPeriod).map(([period, count]) => ({
-          period,
-          count
-        }));
+        const totalTransactions = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+        const statusDistribution = [
+          {
+            name: 'Pendente',
+            value: statusCounts.pending,
+            percentage: totalTransactions > 0 ? (statusCounts.pending / totalTransactions) * 100 : 0
+          },
+          {
+            name: 'Pago',
+            value: statusCounts.paid,
+            percentage: totalTransactions > 0 ? (statusCounts.paid / totalTransactions) * 100 : 0
+          },
+          {
+            name: 'Recebido',
+            value: statusCounts.received,
+            percentage: totalTransactions > 0 ? (statusCounts.received / totalTransactions) * 100 : 0
+          },
+          {
+            name: 'Vencido',
+            value: statusCounts.overdue,
+            percentage: totalTransactions > 0 ? (statusCounts.overdue / totalTransactions) * 100 : 0
+          }
+        ].filter(item => item.value > 0);
+
+        // Process top parties ranking
+        const partyMap = new Map<string, { totalAmount: number; transactionCount: number }>();
+        
+        transactions?.forEach(transaction => {
+          const partyName = transaction.parties?.name || 'Sem Cliente/Fornecedor';
+          const currentData = partyMap.get(partyName) || { totalAmount: 0, transactionCount: 0 };
+          
+          partyMap.set(partyName, {
+            totalAmount: currentData.totalAmount + Number(transaction.amount),
+            transactionCount: currentData.transactionCount + 1
+          });
+        });
+
+        const topParties = Array.from(partyMap.entries())
+          .map(([name, data]) => ({
+            name,
+            totalAmount: data.totalAmount,
+            transactionCount: data.transactionCount
+          }))
+          .sort((a, b) => b.totalAmount - a.totalAmount)
+          .slice(0, 5);
 
         setChartData({
-          cashFlow: cashFlowData,
-          expensesByCategory,
-          overdueAccounts
+          monthlyTotals,
+          statusDistribution,
+          topParties
         });
       } catch (error) {
         console.error('Erro ao carregar dados dos gráficos:', error);
@@ -184,29 +206,21 @@ export function DashboardCharts() {
 
   return (
     <div className="space-y-6">
-      {/* Cash Flow Chart */}
+      {/* Monthly Totals Chart */}
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-xl text-foreground">Fluxo de Caixa</CardTitle>
-              <CardDescription>
-                Receitas e despesas do período selecionado
-              </CardDescription>
-            </div>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Calendar className="w-4 h-4" />
-              {format(dateRange.from, 'dd/MM', { locale: ptBR })} - {format(dateRange.to, 'dd/MM', { locale: ptBR })}
-            </Button>
-          </div>
+          <CardTitle className="text-xl text-foreground">Totais Mensais</CardTitle>
+          <CardDescription>
+            Comparativo mensal de contas a pagar vs. a receber
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData.cashFlow}>
+              <BarChart data={chartData.monthlyTotals}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis 
-                  dataKey="date" 
+                  dataKey="month" 
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={12}
                   tickLine={false}
@@ -229,49 +243,35 @@ export function DashboardCharts() {
                   }}
                   formatter={(value: number, name: string) => [
                     formatCurrency(value),
-                    name === 'receitas' ? 'Receitas' : 
-                    name === 'despesas' ? 'Despesas' : 'Saldo'
+                    name === 'toPay' ? 'A Pagar' : 'A Receber'
                   ]}
                 />
                 <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="receitas" 
-                  stroke="#10b981" 
-                  strokeWidth={3}
-                  name="Receitas"
-                  dot={{ fill: '#10b981', strokeWidth: 2, r: 4 }}
+                <Bar 
+                  dataKey="toPay" 
+                  fill="#ef4444"
+                  name="A Pagar"
+                  radius={[4, 4, 0, 0]}
                 />
-                <Line 
-                  type="monotone" 
-                  dataKey="despesas" 
-                  stroke="#ef4444" 
-                  strokeWidth={3}
-                  name="Despesas"
-                  dot={{ fill: '#ef4444', strokeWidth: 2, r: 4 }}
+                <Bar 
+                  dataKey="toReceive" 
+                  fill="#10b981"
+                  name="A Receber"
+                  radius={[4, 4, 0, 0]}
                 />
-                <Line 
-                  type="monotone" 
-                  dataKey="saldo" 
-                  stroke="#f59e0b" 
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  name="Saldo"
-                  dot={{ fill: '#f59e0b', strokeWidth: 2, r: 3 }}
-                />
-              </LineChart>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </CardContent>
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Expenses by Category Chart */}
+        {/* Status Distribution Chart */}
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="text-xl text-foreground">Despesas por Categoria</CardTitle>
+            <CardTitle className="text-xl text-foreground">Distribuição por Status</CardTitle>
             <CardDescription>
-              Distribuição das principais categorias de despesas
+              Percentual de transações por status
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -279,16 +279,16 @@ export function DashboardCharts() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={chartData.expensesByCategory}
+                    data={chartData.statusDistribution}
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percentage }) => `${name} ${percentage.toFixed(1)}%`}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="value"
                   >
-                    {chartData.expensesByCategory.map((entry, index) => (
+                    {chartData.statusDistribution.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
@@ -299,7 +299,7 @@ export function DashboardCharts() {
                       borderRadius: '8px',
                       color: 'hsl(var(--card-foreground))'
                     }}
-                    formatter={(value: number) => [formatCurrency(value), 'Valor']}
+                    formatter={(value: number) => [value, 'Transações']}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -307,48 +307,47 @@ export function DashboardCharts() {
           </CardContent>
         </Card>
 
-        {/* Overdue Accounts Chart */}
+        {/* Top Parties Ranking */}
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="text-xl text-foreground">Contas Vencidas</CardTitle>
+            <CardTitle className="text-xl text-foreground">Top 5 Clientes/Fornecedores</CardTitle>
             <CardDescription>
-              Análise de vencimento por período
+              Ranking por valor total de transações
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData.overdueAccounts}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis 
-                    dataKey="period" 
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <YAxis 
-                    stroke="hsl(var(--muted-foreground))"
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      color: 'hsl(var(--card-foreground))'
-                    }}
-                    formatter={(value: number) => [value, 'Contas']}
-                  />
-                  <Bar 
-                    dataKey="count" 
-                    fill="#ef4444"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="space-y-4">
+              {chartData.topParties.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>Nenhum dado disponível</p>
+                </div>
+              ) : (
+                chartData.topParties.map((party, index) => (
+                  <div key={party.name} className="flex items-center justify-between p-3 border border-border rounded-lg hover:bg-secondary/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                        index === 0 ? 'bg-yellow-500' :
+                        index === 1 ? 'bg-gray-400' :
+                        index === 2 ? 'bg-amber-600' :
+                        'bg-muted-foreground'
+                      }`}>
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">{party.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {party.transactionCount} transação{party.transactionCount !== 1 ? 'ões' : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-foreground">
+                        {formatCurrency(party.totalAmount)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
