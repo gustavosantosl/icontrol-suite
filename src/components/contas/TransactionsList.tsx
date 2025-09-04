@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Eye, Edit, Trash2, Calendar as CalendarIcon, Search, Filter, Download } from "lucide-react";
+import { Eye, Edit, Trash2, Calendar as CalendarIcon, Search, Filter, Download, FileText, Sheet } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,10 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useTenant } from "@/contexts/TenantContext";
 import { TransactionDetailDrawer } from "./TransactionDetailDrawer";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 interface Transaction {
   id: string;
@@ -204,6 +208,122 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
     fetchTransactions();
   };
 
+  // Export to PDF
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF();
+      
+      // Add title
+      const title = type === 'pagar' ? 'Contas a Pagar' : 'Contas a Receber';
+      doc.setFontSize(16);
+      doc.text(title, 14, 22);
+      
+      // Add generated date
+      doc.setFontSize(10);
+      doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`, 14, 30);
+      
+      // Prepare data for table
+      const tableData = filteredTransactions.map(transaction => [
+        transaction.description,
+        transaction.parties?.name || '-',
+        formatCurrency(transaction.amount),
+        (transaction.num_installments || 1) > 1 ? `${transaction.num_installments}x` : '1x',
+        transaction.first_due_date ? format(new Date(transaction.first_due_date), "dd/MM/yyyy") : '-',
+        getStatusLabel(transaction.status),
+        format(new Date(transaction.created_at), "dd/MM/yyyy")
+      ]);
+      
+      // Generate table
+      autoTable(doc, {
+        head: [['Descrição', 'Fornecedor/Cliente', 'Valor Total', 'Parcelas', 'Vencimento', 'Status', 'Criado em']],
+        body: tableData,
+        startY: 40,
+        styles: {
+          fontSize: 8,
+          cellPadding: 2,
+        },
+        headStyles: {
+          fillColor: [66, 139, 202],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: [245, 245, 245],
+        },
+        columnStyles: {
+          2: { halign: 'right' }, // Amount column
+          4: { halign: 'center' }, // Due date column
+          6: { halign: 'center' }, // Created at column
+        },
+      });
+      
+      // Save the PDF
+      const fileName = `${title.toLowerCase().replace(/\s+/g, '-')}-${format(new Date(), "yyyy-MM-dd")}.pdf`;
+      doc.save(fileName);
+      
+      toast({
+        title: "Sucesso",
+        description: "Arquivo PDF gerado com sucesso",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Erro ao gerar arquivo PDF",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Export to Excel
+  const exportToExcel = () => {
+    try {
+      // Prepare data for Excel
+      const excelData = filteredTransactions.map(transaction => ({
+        'Descrição': transaction.description,
+        'Fornecedor/Cliente': transaction.parties?.name || '-',
+        'Valor Total': transaction.amount,
+        'Parcelas': (transaction.num_installments || 1) > 1 ? `${transaction.num_installments}x` : '1x',
+        'Vencimento': transaction.first_due_date ? format(new Date(transaction.first_due_date), "dd/MM/yyyy") : '-',
+        'Status': getStatusLabel(transaction.status),
+        'Criado em': format(new Date(transaction.created_at), "dd/MM/yyyy")
+      }));
+      
+      // Create workbook
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      
+      // Add title sheet
+      const title = type === 'pagar' ? 'Contas a Pagar' : 'Contas a Receber';
+      XLSX.utils.book_append_sheet(wb, ws, title);
+      
+      // Set column widths
+      ws['!cols'] = [
+        { width: 30 }, // Descrição
+        { width: 25 }, // Fornecedor/Cliente
+        { width: 15 }, // Valor Total
+        { width: 10 }, // Parcelas
+        { width: 12 }, // Vencimento
+        { width: 12 }, // Status
+        { width: 12 }, // Criado em
+      ];
+      
+      // Save the Excel file
+      const fileName = `${title.toLowerCase().replace(/\s+/g, '-')}-${format(new Date(), "yyyy-MM-dd")}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      
+      toast({
+        title: "Sucesso",
+        description: "Arquivo Excel gerado com sucesso",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Erro ao gerar arquivo Excel",
+        variant: "destructive"
+      });
+    }
+  };
+
   const filteredTransactions = transactions.filter(transaction => {
     const matchesSearch = transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          transaction.parties?.name?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -234,10 +354,24 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
             {type === 'pagar' ? 'Contas a Pagar' : 'Contas a Receber'}
           </CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Download className="w-4 h-4 mr-2" />
-              Exportar
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="w-4 h-4 mr-2" />
+                  Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportToPDF}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Exportar PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={exportToExcel}>
+                  <Sheet className="w-4 h-4 mr-2" />
+                  Exportar Excel
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </CardHeader>
