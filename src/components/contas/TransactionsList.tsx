@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useTenant } from "@/contexts/TenantContext";
+import { TransactionDetailDrawer } from "./TransactionDetailDrawer";
 
 interface Transaction {
   id: string;
@@ -44,6 +45,8 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // Fetch transactions
   const fetchTransactions = async () => {
@@ -62,7 +65,17 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
       const { data, error } = await query;
 
       if (error) throw error;
-      setTransactions(data || []);
+      
+      // Map and cast data to match Transaction interface
+      const mappedTransactions: Transaction[] = (data || []).map(item => ({
+        ...item,
+        type: item.type as 'pagar' | 'receber',
+        status: item.status as 'pending' | 'paid' | 'overdue',
+        description: item.description || '',
+        created_at: item.created_at || ''
+      }));
+      
+      setTransactions(mappedTransactions);
     } catch (error: any) {
       toast({
         title: "Erro",
@@ -167,6 +180,28 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
         variant: "destructive"
       });
     }
+  };
+
+  // Handle opening transaction detail drawer
+  const handleViewTransaction = (transaction: Transaction) => {
+    setSelectedTransaction(transaction);
+    setIsDrawerOpen(true);
+  };
+
+  // Handle drawer close
+  const handleDrawerClose = () => {
+    setIsDrawerOpen(false);
+    setSelectedTransaction(null);
+  };
+
+  // Handle transaction deleted from drawer
+  const handleTransactionDeleted = () => {
+    fetchTransactions();
+  };
+
+  // Handle installment updated from drawer
+  const handleInstallmentUpdated = () => {
+    fetchTransactions();
   };
 
   const filteredTransactions = transactions.filter(transaction => {
@@ -340,7 +375,7 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {/* TODO: Open transaction detail */}}
+                        onClick={() => handleViewTransaction(transaction)}
                       >
                         <Eye className="w-4 h-4" />
                       </Button>
@@ -359,6 +394,14 @@ export const TransactionsList = ({ type, refreshTrigger }: TransactionsListProps
           </Table>
         )}
       </CardContent>
+      
+      <TransactionDetailDrawer
+        isOpen={isDrawerOpen}
+        onClose={handleDrawerClose}
+        transaction={selectedTransaction}
+        onTransactionDeleted={handleTransactionDeleted}
+        onInstallmentUpdated={handleInstallmentUpdated}
+      />
     </Card>
   );
 };
