@@ -50,14 +50,18 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   // Buscar perfil e tenant do usuário no Supabase
   const buscarPerfilETenantt = async (userId: string) => {
+    console.log('Iniciando busca de perfil e tenant...');
     try {
       setLoading(true);
       
+      console.log('Buscando perfil para o userId:', userId);
       const { data: dadosPerfil, error: erroPerfil } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
+
+      console.log('dadosPerfil:', dadosPerfil, 'erroPerfil:', erroPerfil);
 
       if (erroPerfil) {
         console.error('Erro ao buscar perfil:', erroPerfil);
@@ -77,11 +81,14 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
       // Buscar informações do tenant se o perfil possui tenant_id
       if (dadosPerfil.tenant_id) {
+        console.log('Buscando tenant...');
         const { data: dadosTenant, error: erroTenant } = await supabase
           .from('tenants')
           .select('*')
           .eq('id', dadosPerfil.tenant_id)
           .single();
+
+        console.log('dadosTenant:', dadosTenant, 'erroTenant:', erroTenant);
 
         if (erroTenant) {
           console.error('Erro ao buscar tenant:', erroTenant);
@@ -98,6 +105,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       setProfile(null);
       setTenant(null);
     } finally {
+      console.log('Busca finalizada.');
       setLoading(false);
     }
   };
