@@ -48,89 +48,90 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileMissing, setProfileMissing] = useState(false);
 
-  // Fetch user profile from Supabase
-  const fetchProfile = async (userId: string) => {
+  // Buscar perfil e tenant do usuário no Supabase
+  const buscarPerfilETenantt = async (userId: string) => {
     try {
-      const { data: profileData, error: profileError } = await supabase
+      setLoading(true);
+      
+      const { data: dadosPerfil, error: erroPerfil } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (profileError) {
-        console.error('Profile fetch error:', profileError);
+      if (erroPerfil) {
+        console.error('Erro ao buscar perfil:', erroPerfil);
         setProfileMissing(true);
         setProfile(null);
         setTenant(null);
         return;
       }
 
-      setProfile({
-        ...profileData,
-        role: profileData.role as 'admin' | 'manager' | 'viewer'
-      });
+      const perfilCompleto: UserProfile = {
+        ...dadosPerfil,
+        role: dadosPerfil.role as 'admin' | 'manager' | 'viewer'
+      };
+      
+      setProfile(perfilCompleto);
       setProfileMissing(false);
 
-      // Fetch tenant info if profile has tenant_id
-      if (profileData.tenant_id) {
-        const { data: tenantData, error: tenantError } = await supabase
+      // Buscar informações do tenant se o perfil possui tenant_id
+      if (dadosPerfil.tenant_id) {
+        const { data: dadosTenant, error: erroTenant } = await supabase
           .from('tenants')
           .select('*')
-          .eq('id', profileData.tenant_id)
+          .eq('id', dadosPerfil.tenant_id)
           .single();
 
-        if (tenantError) {
-          console.error('Tenant fetch error:', tenantError);
+        if (erroTenant) {
+          console.error('Erro ao buscar tenant:', erroTenant);
           setTenant(null);
         } else {
-          setTenant(tenantData);
+          setTenant(dadosTenant);
         }
       } else {
         setTenant(null);
       }
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('Erro geral ao buscar dados do usuário:', error);
       setProfileMissing(true);
       setProfile(null);
       setTenant(null);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Initialize auth state
+  // Inicializar estado de autenticação
   useEffect(() => {
-    // Set up auth state listener
+    // Configurar listener para mudanças no estado de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+      async (event, sessao) => {
+        setSession(sessao);
+        setUser(sessao?.user ?? null);
         
-        if (session?.user) {
-          // Defer profile fetch to avoid deadlock
-          setTimeout(() => {
-            fetchProfile(session.user.id);
-          }, 0);
+        if (sessao?.user) {
+          // Buscar perfil imediatamente após autenticação
+          await buscarPerfilETenantt(sessao.user.id);
         } else {
           setProfile(null);
           setTenant(null);
           setProfileMissing(false);
+          setLoading(false);
         }
-        
-        setLoading(false);
       }
     );
 
-    // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // Verificar sessão existente
+    supabase.auth.getSession().then(({ data: { session: sessaoExistente } }) => {
+      setSession(sessaoExistente);
+      setUser(sessaoExistente?.user ?? null);
       
-      if (session?.user) {
-        setTimeout(() => {
-          fetchProfile(session.user.id);
-        }, 0);
+      if (sessaoExistente?.user) {
+        buscarPerfilETenantt(sessaoExistente.user.id);
+      } else {
+        setLoading(false);
       }
-      
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -186,10 +187,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     return allowedRoles.includes(profile.role);
   };
 
-  // Refetch profile manually
+  // Recarregar perfil manualmente
   const refetchProfile = async () => {
     if (user) {
-      await fetchProfile(user.id);
+      await buscarPerfilETenantt(user.id);
     }
   };
 
