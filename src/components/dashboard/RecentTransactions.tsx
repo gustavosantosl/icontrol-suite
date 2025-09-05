@@ -64,6 +64,7 @@ export function RecentTransactions() {
   };
 
   useEffect(() => {
+    console.log('DEBUG: Profile object inside useEffect:', profile);
     const fetchRecentTransactions = async () => {
       if (!profile?.tenant_id) return;
 
