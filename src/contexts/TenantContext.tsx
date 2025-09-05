@@ -51,15 +51,28 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   // Buscar perfil e tenant do usuário no Supabase
   const buscarPerfilETenantt = async (userId: string) => {
     console.log('Iniciando busca de perfil e tenant...');
+    
+    // Create a timeout promise to prevent infinite loading
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout after 10 seconds')), 10000);
+    });
+
     try {
       setLoading(true);
       
       console.log('Buscando perfil para o userId:', userId);
-      const { data: dadosPerfil, error: erroPerfil } = await supabase
+      
+      // Add timeout to profile fetch
+      const profilePromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
+
+      const { data: dadosPerfil, error: erroPerfil } = await Promise.race([
+        profilePromise,
+        timeoutPromise
+      ]) as any;
 
       console.log('dadosPerfil:', dadosPerfil, 'erroPerfil:', erroPerfil);
 
@@ -82,11 +95,18 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       // Buscar informações do tenant se o perfil possui tenant_id
       if (dadosPerfil.tenant_id) {
         console.log('Buscando tenant...');
-        const { data: dadosTenant, error: erroTenant } = await supabase
+        
+        // Add timeout to tenant fetch
+        const tenantPromise = supabase
           .from('tenants')
           .select('*')
           .eq('id', dadosPerfil.tenant_id)
           .single();
+
+        const { data: dadosTenant, error: erroTenant } = await Promise.race([
+          tenantPromise,
+          timeoutPromise
+        ]) as any;
 
         console.log('dadosTenant:', dadosTenant, 'erroTenant:', erroTenant);
 
