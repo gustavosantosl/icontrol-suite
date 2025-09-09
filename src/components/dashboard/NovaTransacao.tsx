@@ -24,7 +24,11 @@ const esquemaTransacao = z.object({
 
 type DadosTransacao = z.infer<typeof esquemaTransacao>;
 
-export function NovaTransacao() {
+interface NovaTransacaoProps {
+  aoSucesso?: () => void;
+}
+
+export function NovaTransacao({ aoSucesso }: NovaTransacaoProps) {
   const { toast } = useToast();
   const { profile } = useTenant();
   const [carregando, setCarregando] = React.useState(false);
@@ -75,6 +79,9 @@ export function NovaTransacao() {
         title: 'Sucesso',
         description: 'Transação cadastrada com sucesso!',
       });
+
+      // Chamar callback de sucesso
+      aoSucesso?.();
     } catch (erro) {
       console.error('Erro ao cadastrar transação:', erro);
       toast({
@@ -88,11 +95,8 @@ export function NovaTransacao() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle>Nova Transação</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="w-full">
+      <div className="space-y-4">
         <Form {...formulario}>
           <form onSubmit={formulario.handleSubmit(aoSubmeter)} className="space-y-4">
             <FormField
@@ -171,7 +175,7 @@ export function NovaTransacao() {
             </Button>
           </form>
         </Form>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

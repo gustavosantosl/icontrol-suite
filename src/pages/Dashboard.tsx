@@ -1,18 +1,51 @@
+import React from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus } from "lucide-react";
 import { DashboardKPICards } from "@/components/dashboard/DashboardKPICards";
 import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { DashboardExport } from "@/components/dashboard/DashboardExport";
+import { NovaTransacao } from "@/components/dashboard/NovaTransacao";
 import { useTenant } from "@/contexts/TenantContext";
-import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 const Dashboard = () => {
   const { profile, requireRole } = useTenant();
-  const navigate = useNavigate();
+  const [mostrarModal, setMostrarModal] = React.useState(false);
+  const [atualizarLista, setAtualizarLista] = React.useState(0);
 
   // Check if user has access to financial data
   const canViewFinancialData = requireRole(['admin', 'manager', 'viewer']);
+
+  // Função para atualizar lista após inserção
+  const aoSucessoTransacao = () => {
+    setMostrarModal(false);
+    setAtualizarLista(prev => prev + 1);
+  };
+
+  // Real-time updates para transações
+  React.useEffect(() => {
+    if (!profile?.tenant_id) return;
+
+    const channel = supabase
+      .channel('transacoes-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'transactions',
+          filter: `tenant_id=eq.${profile.tenant_id}`
+        },
+        () => setAtualizarLista(prev => prev + 1)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.tenant_id]);
 
   if (!canViewFinancialData) {
     return (
@@ -39,13 +72,20 @@ const Dashboard = () => {
         </div>
         <div className="flex gap-2">
           <DashboardExport />
-          <Button 
-            className="bg-brand-primary hover:bg-brand-primary-dark text-white shadow-md"
-            onClick={() => navigate('/contas')}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Nova Transação
-          </Button>
+          <Dialog open={mostrarModal} onOpenChange={setMostrarModal}>
+            <DialogTrigger asChild>
+              <Button className="bg-brand-primary hover:bg-brand-primary-dark text-white shadow-md">
+                <Plus className="w-4 h-4 mr-2" />
+                Nova Transação
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Cadastrar Nova Transação</DialogTitle>
+              </DialogHeader>
+              <NovaTransacao aoSucesso={aoSucessoTransacao} />
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -56,7 +96,7 @@ const Dashboard = () => {
       <DashboardCharts />
 
       {/* Recent Transactions */}
-      <RecentTransactions />
+      <RecentTransactions key={atualizarLista} />
     </div>
   );
 };
