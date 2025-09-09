@@ -7,6 +7,7 @@ import { DashboardCharts } from "@/components/dashboard/DashboardCharts";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { DashboardExport } from "@/components/dashboard/DashboardExport";
 import { NovaTransacao } from "@/components/dashboard/NovaTransacao";
+import { ResumoFinanceiro } from "@/components/dashboard/ResumoFinanceiro";
 import { useTenant } from "@/contexts/TenantContext";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -97,6 +98,12 @@ const Dashboard = () => {
 
       {/* Recent Transactions */}
       <RecentTransactions key={atualizarLista} />
+
+      {/* Resumo Financeiro */}
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold text-foreground">Resumo Financeiro</h2>
+        <ResumoFinanceiro atualizarDados={atualizarLista} />
+      </div>
     </div>
   );
 };
