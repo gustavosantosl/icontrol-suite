@@ -12,13 +12,14 @@ interface AuthGuardProps {
 
 export function AuthGuard({ children, requireRoles }: AuthGuardProps) {
   const navigate = useNavigate();
-  const { user, profile, loading, profileMissing, signOut } = useTenant();
+  const { session, profile, loading, signOut } = useTenant();
 
   useEffect(() => {
-    if (!loading && !user) {
+    // If loading is false and either no session or no profile, redirect to login
+    if (!loading && (!session || !profile)) {
       navigate('/login');
     }
-  }, [user, loading, navigate]);
+  }, [session, profile, loading, navigate]);
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -32,22 +33,22 @@ export function AuthGuard({ children, requireRoles }: AuthGuardProps) {
     );
   }
 
-  // Redirect to login if not authenticated
-  if (!user) {
+  // Redirect to login if not authenticated (session or profile missing)
+  if (!session || !profile) {
     return null;
   }
 
-  // Show profile missing warning
-  if (profileMissing || !profile) {
+  // Show profile error warning (this should rarely happen now)
+  if (!profile.tenant_id) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="max-w-md w-full space-y-4">
           <Alert className="border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive">
             <AlertDescription>
               <div className="space-y-4">
-                <p className="font-medium">Perfil não encontrado</p>
+                <p className="font-medium">Perfil incompleto</p>
                 <p className="text-sm">
-                  Seu perfil de usuário não foi encontrado ou não está associado a nenhuma empresa.
+                  Seu perfil não está associado a nenhuma empresa.
                   Entre em contato com o administrador do sistema para configurar seu acesso.
                 </p>
                 <div className="flex gap-2">
