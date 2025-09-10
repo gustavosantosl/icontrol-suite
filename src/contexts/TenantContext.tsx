@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -222,7 +222,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const value: TenantContextType = {
+  const value: TenantContextType = useMemo(() => ({
     user,
     session,
     profile,
@@ -236,7 +236,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     signOut,
     requireRole,
     refetchProfile,
-  };
+  }), [user, session, profile, tenant, loading, profileMissing]);
 
   return (
     <TenantContext.Provider value={value}>
