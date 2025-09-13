@@ -17,7 +17,7 @@ const Dashboard = () => {
   const [atualizarLista, setAtualizarLista] = React.useState(0);
 
   // Check if user has access to financial data
-  const canViewFinancialData = requireRole(['admin', 'manager', 'viewer']);
+const canViewFinancialData = requireRole(['admin', 'manager', 'viewer', 'user']);
 
   // Função para atualizar lista após inserção
   const aoSucessoTransacao = () => {
@@ -68,7 +68,7 @@ const Dashboard = () => {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground">
-            Visão geral do controle financeiro - {profile?.full_name || profile?.email}
+            Visão geral do controle financeiro - {profile?.name || profile?.email}
           </p>
         </div>
         <div className="flex gap-2">

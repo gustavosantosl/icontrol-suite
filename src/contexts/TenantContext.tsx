@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { User, Session } from '@supabase/supabase-js';
 
+// --- TIPOS E INTERFACES ---
 export interface UserProfile {
   id: string;
   email: string;
@@ -30,73 +31,58 @@ interface TenantContextType {
   refetchProfile: () => Promise<void>;
 }
 
+// --- CRIAÇÃO DO CONTEXTO ---
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
+// --- COMPONENTE PROVIDER ---
 export function TenantProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [tenant, setTenant] = useState<TenantInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileMissing, setProfileMissing] = useState(false);
+  
+  const user = session?.user ?? null;
 
-  // -------------------------
-  // AUTH LISTENERS
-  // -------------------------
-  useEffect(() => {
-    const currentSession = supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-    });
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  // -------------------------
-  // FETCH PROFILE + TENANT
-  // -------------------------
-  const refetchProfile = async () => {
+  // Função estabilizada com useCallback para buscar dados do usuário
+  const fetchProfileAndTenant = useCallback(async () => {
     if (!user) {
       setProfile(null);
       setTenant(null);
       setProfileMissing(false);
+      setLoading(false);
       return;
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
-      // Buscar perfil
-      const { data: profiles, error: profileError } = await supabase
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
-        .maybeSingle();
+        .single();
 
-      if (profileError) throw profileError;
-
-      if (!profiles) {
-        setProfileMissing(true);
-        setProfile(null);
-        setTenant(null);
-        return;
+      if (profileError) {
+        if (profileError.code === 'PGRST116') { // Erro específico para "nenhuma linha encontrada"
+          console.warn('Perfil não encontrado para o usuário:', user.id);
+          setProfileMissing(true);
+          setProfile(null);
+          setTenant(null);
+        } else {
+          throw profileError;
+        }
+        return; // Retorna após tratar o erro de perfil
       }
-
-      setProfile(profiles as UserProfile);
+      
+      setProfile(profileData as UserProfile);
       setProfileMissing(false);
 
-      if (profiles.tenant_id) {
+      if (profileData?.tenant_id) {
         const { data: tenantData, error: tenantError } = await supabase
           .from('tenants')
           .select('*')
-          .eq('id', profiles.tenant_id)
-          .maybeSingle();
+          .eq('id', profileData.tenant_id)
+          .single();
 
         if (tenantError) throw tenantError;
         setTenant(tenantData as TenantInfo);
@@ -110,67 +96,52 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]); // Depende apenas do ID do usuário, que é estável
 
+  // Efeito para escutar a autenticação
   useEffect(() => {
-    if (user) {
-      refetchProfile();
-    } else {
-      setProfile(null);
-      setTenant(null);
-      setLoading(false);
-    }
-  }, [user]);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
 
-  // -------------------------
-  // AUTH FUNCTIONS
-  // -------------------------
-  const signIn = async (email: string, password: string) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  
+  // Efeito para buscar dados quando o usuário muda
+  useEffect(() => {
+    fetchProfileAndTenant();
+  }, [user?.id, fetchProfileAndTenant]);
+
+
+  // Funções de autenticação estabilizadas com useCallback
+  const signIn = useCallback(async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return { user: data.user, session: data.session };
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string) => {
+    // A criação de perfil é melhor tratada por um DB Trigger no Supabase
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
-
-    const user = data.user;
-    if (user) {
-      // Criar o perfil automaticamente
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: user.id,
-        email: user.email,
-        tenant_id: null,
-        role: 'viewer',
-      });
-
-      if (profileError) {
-        console.error('Erro ao criar perfil do usuário:', profileError.message);
-        throw profileError;
-      }
-    }
-
     return { user: data.user, session: data.session };
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await supabase.auth.signOut();
-    setUser(null);
-    setSession(null);
-    setProfile(null);
-    setTenant(null);
-  };
+  }, []);
 
-  const requireRole = (roles: string[]) => {
+  const requireRole = useCallback((roles: string[]) => {
     if (!profile?.role) return false;
     return roles.includes(profile.role);
-  };
-
-  // -------------------------
-  // MEMOIZED VALUE
-  // -------------------------
-  const value: TenantContextType = useMemo(() => ({
+  }, [profile]);
+  
+  // Valor do contexto memorizado, agora com funções estáveis
+  const value = useMemo(() => ({
     user,
     session,
     profile,
@@ -183,8 +154,20 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     requireRole,
-    refetchProfile,
-  }), [user, session, profile, tenant, loading, profileMissing]);
+    refetchProfile: fetchProfileAndTenant,
+  }), [
+    user,
+    session,
+    profile,
+    tenant,
+    loading,
+    profileMissing,
+    signIn,
+    signUp,
+    signOut,
+    requireRole,
+    fetchProfileAndTenant
+  ]);
 
   return (
     <TenantContext.Provider value={value}>
@@ -193,10 +176,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Hook para usar o contexto
 export function useTenant() {
   const context = useContext(TenantContext);
   if (!context) {
-    throw new Error('useTenant must be used within a TenantProvider');
+    throw new Error('useTenant deve ser usado dentro de um TenantProvider');
   }
   return context;
 }
