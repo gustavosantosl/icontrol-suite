@@ -1,22 +1,17 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
-import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import { useToast } from '@/hooks/use-toast';
+import { User, Session } from '@supabase/supabase-js';
 
-// Types
 export interface UserProfile {
   id: string;
-  email: string | null;
-  full_name: string | null;
-  role: 'admin' | 'manager' | 'viewer';
+  email: string;
   tenant_id: string | null;
-  created_at: string;
+  role: string;
 }
 
 export interface TenantInfo {
   id: string;
   name: string;
-  created_at: string;
 }
 
 interface TenantContextType {
@@ -28,19 +23,16 @@ interface TenantContextType {
   role: string | null;
   loading: boolean;
   profileMissing: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
+  signIn: (email: string, password: string) => Promise<{ user: User | null; session: Session | null; }>;
+  signUp: (email: string, password: string) => Promise<{ user: User | null; session: Session | null; }>;
   signOut: () => Promise<void>;
-  requireRole: (allowedRoles: string[]) => boolean;
+  requireRole: (roles: string[]) => boolean;
   refetchProfile: () => Promise<void>;
 }
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
-  const { toast } = useToast();
-  
-  // Auth state
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -48,156 +40,118 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileMissing, setProfileMissing] = useState(false);
 
-  // Buscar perfil e tenant do usuário no Supabase
-  const buscarPerfilETenantt = async (userId: string) => {
-    console.log('Iniciando busca de perfil e tenant...');
-    
-    // Create a timeout promise to prevent infinite loading
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Timeout after 10 seconds')), 10000);
+  // -------------------------
+  // AUTH LISTENERS
+  // -------------------------
+  useEffect(() => {
+    const currentSession = supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setUser(data.session?.user ?? null);
     });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setUser(newSession?.user ?? null);
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // -------------------------
+  // FETCH PROFILE + TENANT
+  // -------------------------
+  const refetchProfile = async () => {
+    if (!user) {
+      setProfile(null);
+      setTenant(null);
+      setProfileMissing(false);
+      return;
+    }
 
     try {
       setLoading(true);
-      
-      console.log('Buscando perfil para o userId:', userId);
-      
-      // Add timeout to profile fetch
-      const profilePromise = supabase
+      // Buscar perfil
+      const { data: profiles, error: profileError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
-        .single();
+        .eq('id', user.id)
+        .maybeSingle();
 
-      const { data: dadosPerfil, error: erroPerfil } = await Promise.race([
-        profilePromise,
-        timeoutPromise
-      ]) as any;
+      if (profileError) throw profileError;
 
-      console.log('dadosPerfil:', dadosPerfil, 'erroPerfil:', erroPerfil);
-
-      if (erroPerfil) {
-        console.error('Erro ao buscar perfil:', erroPerfil);
+      if (!profiles) {
         setProfileMissing(true);
         setProfile(null);
         setTenant(null);
         return;
       }
 
-      const perfilCompleto: UserProfile = {
-        ...dadosPerfil,
-        role: dadosPerfil.role as 'admin' | 'manager' | 'viewer'
-      };
-      
-      setProfile(perfilCompleto);
+      setProfile(profiles as UserProfile);
       setProfileMissing(false);
 
-      // Buscar informações do tenant se o perfil possui tenant_id
-      if (dadosPerfil.tenant_id) {
-        console.log('Buscando tenant...');
-        
-        // Add timeout to tenant fetch
-        const tenantPromise = supabase
+      if (profiles.tenant_id) {
+        const { data: tenantData, error: tenantError } = await supabase
           .from('tenants')
           .select('*')
-          .eq('id', dadosPerfil.tenant_id)
-          .single();
+          .eq('id', profiles.tenant_id)
+          .maybeSingle();
 
-        const { data: dadosTenant, error: erroTenant } = await Promise.race([
-          tenantPromise,
-          timeoutPromise
-        ]) as any;
-
-        console.log('dadosTenant:', dadosTenant, 'erroTenant:', erroTenant);
-
-        if (erroTenant) {
-          console.error('Erro ao buscar tenant:', erroTenant);
-          setTenant(null);
-        } else {
-          setTenant(dadosTenant);
-        }
+        if (tenantError) throw tenantError;
+        setTenant(tenantData as TenantInfo);
       } else {
         setTenant(null);
       }
-    } catch (error) {
-      console.error('Erro geral ao buscar dados do usuário:', error);
-      setProfileMissing(true);
+    } catch (err) {
+      console.error('Erro ao buscar perfil/tenant:', err);
       setProfile(null);
       setTenant(null);
     } finally {
-      console.log('Busca finalizada.');
       setLoading(false);
     }
   };
 
-  // Inicializar estado de autenticação
   useEffect(() => {
-    // Configurar listener para mudanças no estado de autenticação
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, sessao) => {
-        setSession(sessao);
-        setUser(sessao?.user ?? null);
-        
-        if (sessao?.user) {
-          // Buscar perfil imediatamente após autenticação
-          await buscarPerfilETenantt(sessao.user.id);
-        } else {
-          setProfile(null);
-          setTenant(null);
-          setProfileMissing(false);
-          setLoading(false);
-        }
-      }
-    );
-
-    // Verificar sessão existente
-    supabase.auth.getSession().then(({ data: { session: sessaoExistente } }) => {
-      setSession(sessaoExistente);
-      setUser(sessaoExistente?.user ?? null);
-      
-      if (sessaoExistente?.user) {
-        buscarPerfilETenantt(sessaoExistente.user.id);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // Auth methods
-  const signIn = async (email: string, password: string) => {
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      
-      return { error };
-    } catch (error) {
-      return { error: error as Error };
+    if (user) {
+      refetchProfile();
+    } else {
+      setProfile(null);
+      setTenant(null);
+      setLoading(false);
     }
+  }, [user]);
+
+  // -------------------------
+  // AUTH FUNCTIONS
+  // -------------------------
+  const signIn = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    return { user: data.user, session: data.session };
   };
 
-  const signUp = async (email: string, password: string, fullName?: string) => {
-    try {
-      const redirectUrl = `${window.location.origin}/`;
-      
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: redirectUrl,
-          data: {
-            full_name: fullName || email
-          }
-        }
+  const signUp = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+
+    const user = data.user;
+    if (user) {
+      // Criar o perfil automaticamente
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: user.id,
+        email: user.email,
+        tenant_id: null,
+        role: 'viewer',
       });
-      
-      return { error };
-    } catch (error) {
-      return { error: error as Error };
+
+      if (profileError) {
+        console.error('Erro ao criar perfil do usuário:', profileError.message);
+        throw profileError;
+      }
     }
+
+    return { user: data.user, session: data.session };
   };
 
   const signOut = async () => {
@@ -206,22 +160,16 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
     setProfile(null);
     setTenant(null);
-    setProfileMissing(false);
   };
 
-  // Role checking helper
-  const requireRole = (allowedRoles: string[]): boolean => {
-    if (!profile || !profile.role) return false;
-    return allowedRoles.includes(profile.role);
+  const requireRole = (roles: string[]) => {
+    if (!profile?.role) return false;
+    return roles.includes(profile.role);
   };
 
-  // Recarregar perfil manualmente
-  const refetchProfile = async () => {
-    if (user) {
-      await buscarPerfilETenantt(user.id);
-    }
-  };
-
+  // -------------------------
+  // MEMOIZED VALUE
+  // -------------------------
   const value: TenantContextType = useMemo(() => ({
     user,
     session,
@@ -245,26 +193,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Custom hook to use tenant context
 export function useTenant() {
   const context = useContext(TenantContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useTenant must be used within a TenantProvider');
   }
   return context;
-}
-
-// Custom hook for role checking with redirect/error
-export function useRequireRole(allowedRoles: string[]) {
-  const { requireRole, role, loading } = useTenant();
-  
-  if (loading) return { hasAccess: false, loading: true };
-  
-  const hasAccess = requireRole(allowedRoles);
-  
-  if (!hasAccess && !loading) {
-    throw new Error(`Access denied. Required roles: ${allowedRoles.join(', ')}. Your role: ${role || 'none'}`);
-  }
-  
-  return { hasAccess, loading: false };
 }
