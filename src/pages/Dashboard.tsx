@@ -1,3 +1,4 @@
+// src/pages/Dashboard.tsx
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -10,14 +11,28 @@ import { NovaTransacao } from "@/components/dashboard/NovaTransacao";
 import { ResumoFinanceiro } from "@/components/dashboard/ResumoFinanceiro";
 import { useTenant } from "@/contexts/TenantContext";
 import { supabase } from "@/integrations/supabase/client";
+import { startOfMonth, endOfMonth } from "date-fns";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as RechartTooltip,
+} from "recharts";
 
-const Dashboard = () => {
+const COLORS = {
+  entrada: "#16a34a", // green
+  saida: "#ef4444",   // red
+  neutral: "#E5E7EB", // gray
+};
+
+const Dashboard: React.FC = () => {
   const { profile, requireRole } = useTenant();
   const [mostrarModal, setMostrarModal] = React.useState(false);
   const [atualizarLista, setAtualizarLista] = React.useState(0);
 
   // Check if user has access to financial data
-const canViewFinancialData = requireRole(['admin', 'manager', 'viewer', 'user']);
+  const canViewFinancialData = requireRole(['admin', 'manager', 'viewer', 'user']);
 
   // Função para atualizar lista após inserção
   const aoSucessoTransacao = () => {
@@ -93,6 +108,9 @@ const canViewFinancialData = requireRole(['admin', 'manager', 'viewer', 'user'])
       {/* KPI Cards */}
       <DashboardKPICards />
 
+      {/* --- NOVO: Faturamento Mensal (círculo + totais) */}
+      <FaturamentoMensal key={atualizarLista} tenantId={profile?.tenant_id || null} />
+
       {/* Charts Section */}
       <DashboardCharts />
 
@@ -109,3 +127,147 @@ const canViewFinancialData = requireRole(['admin', 'manager', 'viewer', 'user'])
 };
 
 export default Dashboard;
+
+/* ============================
+   Componente local: FaturamentoMensal
+   - mostra total de vendas (entradas) do mês
+   - mostra total gasto (saídas) do mês
+   - donut (metade verde/metade vermelho de acordo com proporção)
+   ============================ */
+type FaturamentoMensalProps = {
+  tenantId: string | null;
+};
+
+const FaturamentoMensal: React.FC<FaturamentoMensalProps> = ({ tenantId }) => {
+  const [carregando, setCarregando] = React.useState(false);
+  const [entradaTotal, setEntradaTotal] = React.useState<number>(0);
+  const [saidaTotal, setSaidaTotal] = React.useState<number>(0);
+
+  const buscarTotais = React.useCallback(async () => {
+    if (!tenantId) {
+      setEntradaTotal(0);
+      setSaidaTotal(0);
+      return;
+    }
+
+    setCarregando(true);
+    try {
+      const inicio = startOfMonth(new Date());
+      const fim = endOfMonth(new Date());
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('id, amount, type, created_at')
+        .eq('tenant_id', tenantId)
+        .gte('created_at', inicio.toISOString())
+        .lte('created_at', fim.toISOString());
+
+      if (error) throw error;
+
+      let entradas = 0;
+      let saidas = 0;
+
+      (data || []).forEach((t: any) => {
+        const valor = Number(t.amount || 0);
+        const tipo = (t.type || '').toString().toLowerCase();
+        if (tipo === 'receber' || tipo === 'entrada') {
+          entradas += valor;
+        } else if (tipo === 'pagar' || tipo === 'saida' || tipo === 'saída') {
+          saidas += valor;
+        }
+      });
+
+      setEntradaTotal(Number(entradas.toFixed(2)));
+      setSaidaTotal(Number(saidas.toFixed(2)));
+    } catch (err) {
+      console.error(err);
+      setEntradaTotal(0);
+      setSaidaTotal(0);
+    } finally {
+      setCarregando(false);
+    }
+  }, [tenantId]);
+
+  React.useEffect(() => {
+    buscarTotais();
+  }, [buscarTotais]);
+
+  const total = entradaTotal + saidaTotal;
+  const data = total > 0
+    ? [
+        { name: 'Entradas', value: entradaTotal, color: COLORS.entrada },
+        { name: 'Saídas', value: saidaTotal, color: COLORS.saida },
+      ]
+    : [
+        { name: 'Entradas', value: 1, color: COLORS.neutral },
+        { name: 'Saídas', value: 1, color: COLORS.neutral },
+      ];
+
+  const formatCurrency = (v: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+
+  const net = entradaTotal - saidaTotal;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Donut com label central corrigido */}
+      <div className="p-4 rounded-2xl bg-white shadow-sm flex items-center justify-center relative">
+        <div style={{ width: 220, height: 220 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <RechartTooltip
+                formatter={(value: any, name: string) => [
+                  formatCurrency(Number(value)),
+                  name
+                ]}
+              />
+              <Pie
+                data={data}
+                innerRadius={70}
+                outerRadius={95}
+                padAngle={2}
+                dataKey="value"
+                startAngle={90}
+                endAngle={-270}
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        {/* Label central FIXO */}
+        <div className="absolute text-center">
+          <div className="text-sm text-muted-foreground">Saldo Líquido</div>
+          <div className={`text-lg font-semibold ${net >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {formatCurrency(net)}
+          </div>
+          <div className="text-xs text-muted-foreground">Mensal</div>
+        </div>
+      </div>
+
+      {/* Totais - Entradas */}
+      <div className="p-4 rounded-2xl bg-white shadow-sm flex flex-col justify-between">
+        <div>
+          <div className="text-sm text-muted-foreground">Total de Vendas (mês)</div>
+          <div className="mt-2 text-2xl font-bold text-green-600">{formatCurrency(entradaTotal)}</div>
+        </div>
+        <div className="text-xs text-muted-foreground mt-4">
+          {carregando ? "Carregando..." : "Valores calculados para o mês atual"}
+        </div>
+      </div>
+
+      {/* Totais - Saídas */}
+      <div className="p-4 rounded-2xl bg-white shadow-sm flex flex-col justify-between">
+        <div>
+          <div className="text-sm text-muted-foreground">Total Gasto (mês)</div>
+          <div className="mt-2 text-2xl font-bold text-red-600">{formatCurrency(saidaTotal)}</div>
+        </div>
+        <div className="text-xs text-muted-foreground mt-4">
+          {carregando ? "Carregando..." : "Valores calculados para o mês atual"}
+        </div>
+      </div>
+    </div>
+  );
+};
